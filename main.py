@@ -2,6 +2,11 @@ import streamlit as st
 from openai import OpenAI
 import time
 from contract_generator import generate_smart_contract
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Initialize OpenAI client
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
@@ -82,8 +87,11 @@ if not st.session_state.generation_in_progress:
             assistant_id=st.session_state.assistant.id
         )
 
+        # Flag to indicate when to exit the main loop
+        exit_main_loop = False
+
         # Wait for the run to complete or require action
-        while True:
+        while not exit_main_loop:
             run_status = client.beta.threads.runs.retrieve(
                 thread_id=st.session_state.thread.id,
                 run_id=run.id
@@ -101,15 +109,16 @@ if not st.session_state.generation_in_progress:
                                 thread_id=st.session_state.thread.id,
                                 run_id=run.id
                             )
+                            exit_main_loop = True
                             break
 
                         # Stop the conversation and start contract generation
                         st.session_state.messages.append({
                             "role": "assistant",
-                            "content": f"Smart contract generation has started. You will receive the contract at {st.session_state.email} once it's ready. Please wait..."
+                            "content": f"Smart contract generation has started. You will receive the contract at {st.session_state.email} once it's ready. Please wait and don't close the window or text the AI, the mail will arrive in a few minutes and the zip file will be available for 24 hours..."
                         })
                         with st.chat_message("assistant"):
-                            st.markdown(f"Smart contract generation has started. You will receive the contract at {st.session_state.email} once it's ready. Please wait...")
+                            st.markdown(f"Smart contract generation has started. You will receive the contract at {st.session_state.email} once it's ready. Please wait and don't close the window or text the AI, the mail will arrive in a few minutes and the zip file will be available for 24 hours...")
                         
                         # Disable messaging
                         st.session_state.generation_in_progress = True
@@ -129,18 +138,24 @@ if not st.session_state.generation_in_progress:
                         
                         st.session_state.messages.append({
                             "role": "assistant",
-                            "content": f"Smart contract has been generated and will be sent to {st.session_state.email} shortly."
+                            "content": f"Smart contract has been generated and has been sent to {st.session_state.email}."
                         })
                         with st.chat_message("assistant"):
-                            st.markdown(f"Smart contract has been generated and will be sent to {st.session_state.email} shortly.")
+                            st.markdown(f"Smart contract has been generated and has been sent to {st.session_state.email}.")
                         
                         # Re-enable messaging
                         st.session_state.generation_in_progress = False
                         
+                        exit_main_loop = True
                         break  # Exit the for loop
 
-            if st.session_state.generation_in_progress:
-                break  # Exit the while loop if contract generation started
+                if exit_main_loop:
+                    break  # Exit the while loop if contract generation started
+
+            elif run_status.status in ['failed', 'cancelled', 'expired']:
+                logger.error(f"Run failed with status: {run_status.status}")
+                break
+
             time.sleep(1)
 
         # Retrieve and display only the latest assistant message

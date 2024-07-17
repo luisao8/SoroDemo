@@ -13,6 +13,11 @@ from firebase_admin import credentials, storage
 from io import BytesIO
 import datetime
 import json
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 firebase_creds = dict(st.secrets["firebase"])
 with open("firebase_credentials.json", "w") as f:
@@ -28,8 +33,6 @@ client_anthropic = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
 problem_statement_assistant_id = st.secrets["PROBLEM_STATEMENT_ASSISTANT_ID"]
 liquidity_builder_assistant_id = st.secrets["LIQUIDITY_BUILDER_ASSISTANT_ID"]
 token_builder_assistant_id = st.secrets["TOKEN_BUILDER_ASSISTANT_ID"]
-
-
 
 
 def read_contract_template(contract, file):
@@ -67,7 +70,7 @@ def generate_temporal_url(zip_file_path):
     blob.upload_from_file(bytes_io, content_type='application/zip')
     
     # Generate a signed URL that expires in 1 hour (3600 seconds)
-    url_temporal = blob.generate_signed_url(version='v4', expiration=3600, method='GET')
+    url_temporal = blob.generate_signed_url(version='v4', expiration=86300, method='GET')
     
     return url_temporal
 
@@ -110,14 +113,14 @@ def create_run_and_poll(thread_id, assistant_id):
         assistant_id=assistant_id
         
     )
-    print(run) 
+    logger.info(run) 
     i = 0
     while True:
         run_status = client.beta.threads.runs.retrieve(
             thread_id=thread_id,
             run_id=run.id
         )
-        print(f"run {i}")
+        logger.info(f"run {i}")
         i += 1
         if run_status.status == 'completed':
             thread_messages = client.beta.threads.messages.list(thread_id, order="desc")
@@ -180,12 +183,12 @@ def prob_statement(thread_id, problem_statement_assistant_id):
 # Retrieve the assistant's response
     response = client.beta.threads.messages.list(thread_id=thread_id, order="desc", limit=1)
     problem_statement = response.data[0].content[0].text.value
-    print(problem_statement)
+    logger.info(problem_statement)
     return problem_statement
 
 def build_liquidity_pool(problem_statement):
     thread_id = create_thread()
-    print(f"Thread created: {thread_id}")
+    logger.info(f"Thread created: {thread_id}")
     
     liquidity_files = [
         ("contract.rs", liquidity_contract),
@@ -211,15 +214,15 @@ Please provide the adapted code for {file_name}."""
         
         add_message(thread_id, "user", prompt)
         response = create_run_and_poll(thread_id, liquidity_builder_assistant_id)
-        print(response)
+        logger.info(response)
         responses.append((file_name, response))
-        print(f"Generated {file_name}")
+        logger.info(f"Generated {file_name}")
     
     return responses
 
 def build_token_contract(problem_statement, liquidity_pool_documentation):
     thread_id = create_thread()
-    print(f"Thread created for token contract: {thread_id}")
+    logger.info(f"Thread created for token contract: {thread_id}")
     
     # First, add the liquidity pool documentation to the thread
     add_message(thread_id, "user", f"""Here is the documentation for the liquidity pool contract that this token will interact with:
@@ -257,7 +260,7 @@ Please provide the adapted code for {file_name}. Include comments explaining any
         add_message(thread_id, "user", prompt)
         response = create_run_and_poll(thread_id, token_builder_assistant_id)
         responses.append((file_name, response))
-        print(f"Generated {file_name} for token contract")
+        logger.info(f"Generated {file_name} for token contract")
     
     
     return responses
@@ -359,7 +362,7 @@ def send_email_with_make(email, system_overview, temp_url):
     <html>
     <body>
     <p>Hi developer,</p>
-    <p>Thanks for using our Smart Contract Generator. You can download your smart contract files <a href="{temp_url}">here</a>. This link will expire in 1 hour.</p>
+    <p>Thanks for using our Smart Contract Generator. You can download your smart contract files <a href="{temp_url}">here</a>. This link will expire in 24 hours.</p>
     <p>Here is a comment from the AI system architect about how the smart contract system works so you can have a quick overview:</p>
     <p>{system_overview}</p>
     <p>Best,<br>Missio IA</p>
@@ -379,23 +382,20 @@ def send_email_with_make(email, system_overview, temp_url):
 
     # Check if the request was successful
     if response.status_code == 200:
-        print("Email sent successfully via make.com")
+        logger.info("Email sent successfully via make.com")
     else:
-        print(f"Failed to send email. Status code: {response.status_code}")
+        logger.error(f"Failed to send email. Status code: {response.status_code}")
 
 
 
 def generate_smart_contract(email, thread_id):
-    
-    
     problem_statement = prob_statement(thread_id, problem_statement_assistant_id)
-    
     liquidity_responses = build_liquidity_pool(problem_statement)
     liquidity_pool_documentation = generate_documentation(problem_statement, liquidity_responses)
     token_responses = build_token_contract(problem_statement, liquidity_pool_documentation)
     token_documentation = generate_documentation(problem_statement, token_responses)
     system_overview = generate_system_overview(problem_statement, liquidity_pool_documentation, token_documentation)
-    print(f"SYSTEM OVERVIEW: {system_overview}")
+    logger.info(f"SYSTEM OVERVIEW: {system_overview}")
     zip_file_path = create_contract_zip(
         liquidity_responses, 
         token_responses, 
@@ -403,7 +403,7 @@ def generate_smart_contract(email, thread_id):
         token_documentation, 
         system_overview
     )
-    print("Smart contract generated!")
+    logger.info("Smart contract generated!")
     temp_url = generate_temporal_url(zip_file_path)
     send_email_with_make(email, system_overview, temp_url)
     os.unlink(zip_file_path)
