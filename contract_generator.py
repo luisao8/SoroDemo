@@ -364,7 +364,7 @@ def send_email_with_make(email, system_overview, temp_url):
     <p>Hi developer,</p>
     <p>Thanks for using our Smart Contract Generator. You can download your smart contract files <a href="{temp_url}">here</a>. This link will expire in 24 hours.</p>
     <p>Here is a comment from the AI system architect about how the smart contract system works so you can have a quick overview:</p>
-    <p>{system_overview}</p>
+    {system_overview}
     <p>Best,<br>Missio IA</p>
     </body>
     </html>
@@ -386,7 +386,24 @@ def send_email_with_make(email, system_overview, temp_url):
     else:
         logger.error(f"Failed to send email. Status code: {response.status_code}")
 
+def convert_overview_to_html(system_overview):
+    prompt = f"""Convert the following system overview to well-formatted HTML for easy readability in an email. Take into account that it will inserted into an already existing html email, so there is no need for <head/> tags. Only output the body of the mail, don't use ```html delimiters, only outpout the html code. Here is the paragraph:
 
+{system_overview}
+
+Please use appropriate HTML tags such as <h1>, <h2>, <p>, <ul>, <li>, etc. to structure the content. Don't change anything in the text, only add tags".
+"""
+
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant that converts text to well-formatted HTML."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.2
+    )
+    
+    return response.choices[0].message.content
 
 def generate_smart_contract(email, thread_id):
     problem_statement = prob_statement(thread_id, problem_statement_assistant_id)
@@ -395,7 +412,8 @@ def generate_smart_contract(email, thread_id):
     token_responses = build_token_contract(problem_statement, liquidity_pool_documentation)
     token_documentation = generate_documentation(problem_statement, token_responses)
     system_overview = generate_system_overview(problem_statement, liquidity_pool_documentation, token_documentation)
-    logger.info(f"SYSTEM OVERVIEW: {system_overview}")
+    system_overview_html = convert_overview_to_html(system_overview)
+    logger.info(f"SYSTEM OVERVIEW: {system_overview_html}")
     zip_file_path = create_contract_zip(
         liquidity_responses, 
         token_responses, 
@@ -405,15 +423,6 @@ def generate_smart_contract(email, thread_id):
     )
     logger.info("Smart contract generated!")
     temp_url = generate_temporal_url(zip_file_path)
-    send_email_with_make(email, system_overview, temp_url)
+    send_email_with_make(email, system_overview_html, temp_url)
     os.unlink(zip_file_path)
     return "Smart contract generated and email sent!"
-
-email = "luis.alarcon@missioia.com"
-problem_statement = """1. **Tokens**: USDC (USD Coin) and ETH (Ethereum)
-2. **Desired Pool Ratio**: 50:50 (equal value of USDC and ETH)
-3. **Swap Fees**: 0.3% per transaction
-4. **Liquidity Provider Rewards**: Share of the swap fees proportional to their contribution, distributed via LP tokens"""
-
-
-# generate_smart_contract(email, problem_statement)
